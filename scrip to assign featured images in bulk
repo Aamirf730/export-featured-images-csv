@@ -1,0 +1,70 @@
+upload the CSV file on the server and run the below code once. 
+
+<?php
+require('wp-load.php');
+
+function update_featured_images_from_csv($csv_url, $start, $batch_size) {
+    // Fetch CSV data from URL
+    $csv_data = file_get_contents($csv_url);
+    if ($csv_data === false) {
+        die("Failed to retrieve CSV file from URL.");
+    }
+
+    // Convert CSV data to an array
+    $lines = explode(PHP_EOL, $csv_data);
+    $csv = array_map('str_getcsv', $lines);
+
+    $end = min($start + $batch_size, count($csv));
+    for ($i = $start; $i < $end; $i++) {
+        $row = $csv[$i];
+        $post_id = isset($row[0]) ? $row[0] : null;
+        $image_url = isset($row[2]) ? $row[2] : null;
+
+        if ($post_id && $image_url) {
+            if (get_post_status($post_id)) {
+                $attachment_id = insert_attachment_from_url($image_url, $post_id);
+                if ($attachment_id) {
+                    set_post_thumbnail($post_id, $attachment_id);
+                }
+            }
+        }
+    }
+
+    return $i >= count($csv) ? -1 : $i; // Return the next index or -1 if done
+}
+
+function insert_attachment_from_url($url, $parent_post_id = 0) {
+    include_once(ABSPATH . 'wp-admin/includes/image.php');
+    include_once(ABSPATH . 'wp-admin/includes/file.php');
+    include_once(ABSPATH . 'wp-admin/includes/media.php');
+
+    $tmp = download_url($url);
+    if (is_wp_error($tmp)) {
+        return $tmp;
+    }
+
+    preg_match('/[^\?]+\.(jpg|jpeg|png|gif)\b/i', $url, $matches);
+    $file_array = array(
+        'name' => basename($matches[0]),
+        'tmp_name' => $tmp
+    );
+
+    $id = media_handle_sideload($file_array, $parent_post_id);
+    if (is_wp_error($id)) {
+        @unlink($file_array['tmp_name']);
+        return $id;
+    }
+
+    return $id;
+}
+
+$batch_size = 20; // Adjust batch size as needed
+$start = isset($_GET['start']) ? intval($_GET['start']) : 0;
+$next = update_featured_images_from_csv('http://yourdomain.com/wp-content/your_csv_file.csv', $start, $batch_size);  //change the path of the upoloaded csv file 
+
+if ($next != -1) {
+    echo "<script>window.location = '?start=$next';</script>";
+} else {
+    echo "All posts have been updated.";
+}
+?>
